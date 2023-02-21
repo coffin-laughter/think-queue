@@ -184,7 +184,7 @@ class Amqp extends Connector
         return $jobId ?? null;
     }
 
-    public function size($queue)
+    public function size($queue = null)
     {
 //        $queue = $this->getQueue($queue);
         return 0;

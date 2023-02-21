@@ -10,7 +10,7 @@
  * @date  : 2022-09-02 09:06
  */
 
-namespace coffin\queue\job;
+namespace think\queue;
 
 use Exception;
 use think\App;
@@ -285,7 +285,7 @@ abstract class Job
             $name = ($this->app->config->get('app.app_namespace') ?: 'app\\') . ($app ? strtolower($app) . '\\' : '') . 'job\\' . $name;
         }
         if ( ! class_exists($name)) {
-            Log::queue("[RESOLVE][ERROR]:Class {$name} not exists!");
+            Log::error("[RESOLVE][ERROR]:Class {$name} not exists!");
         }
 
         return $this->app->make($name);
