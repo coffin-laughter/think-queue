@@ -1,46 +1,28 @@
 <?php
-// +----------------------------------------------------------------------
-// | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
-// +----------------------------------------------------------------------
-// | Copyright (c) 2006-2015 http://thinkphp.cn All rights reserved.
-// +----------------------------------------------------------------------
-// | Licensed ( http://www.apache.org/licenses/LICENSE-2.0 )
-// +----------------------------------------------------------------------
-// | Author: yunwuxin <448901948@qq.com>
-// +----------------------------------------------------------------------
+/**
+ * FileName: Job.php
+ * ==============================================
+ * Copy right 2016-2022
+ * ----------------------------------------------
+ * This is not a free software, without any authorization is not allowed to use and spread.
+ * ==============================================
+ * @author: coffin_laughter | <chuanshuo_yongyuan@163.com>
+ * @date  : 2022-09-02 09:06
+ */
 
-namespace think\queue;
+namespace coffin\queue\job;
 
 use Exception;
 use think\App;
-use think\helper\Arr;
-use think\helper\Str;
+use think\facade\Log;
+use function Co\run;
 
 abstract class Job
 {
-
-    /**
-     * The job handler instance.
-     * @var object
-     */
-    private $instance;
-
-    /**
-     *  The JSON decoded version of "$job".
-     * @var array
-     */
-    private $payload;
-
     /**
      * @var App
      */
     protected $app;
-
-    /**
-     * The name of the queue the job belongs to.
-     * @var string
-     */
-    protected $queue;
 
     /**
      * The name of the connection the job belongs to.
@@ -54,12 +36,6 @@ abstract class Job
     protected $deleted = false;
 
     /**
-     * Indicates if the job has been released.
-     * @var bool
-     */
-    protected $released = false;
-
-    /**
      * Indicates if the job has failed.
      *
      * @var bool
@@ -67,48 +43,28 @@ abstract class Job
     protected $failed = false;
 
     /**
-     * Get the decoded body of the job.
-     *
-     * @return mixed
+     * The job handler instance.
+     * @var mixed
      */
-    public function payload($name = null, $default = null)
-    {
-        if (empty($this->payload)) {
-            $this->payload = json_decode($this->getRawBody(), true);
-        }
-        if (empty($name)) {
-            return $this->payload;
-        }
-        return Arr::get($this->payload, $name, $default);
-    }
+    protected $instance;
 
     /**
-     * Fire the job.
-     * @return void
+     * The name of the queue the job belongs to.
+     * @var string
      */
-    public function fire()
-    {
-        $instance = $this->getResolvedJob();
-
-        [, $method] = $this->getParsedJob();
-
-        $instance->{$method}($this, $this->payload('data'));
-    }
+    protected $queue;
 
     /**
-     * Process an exception that caused the job to fail.
-     *
-     * @param Exception $e
-     * @return void
+     * Indicates if the job has been released.
+     * @var bool
      */
-    public function failed($e)
-    {
-        $instance = $this->getResolvedJob();
+    protected $released = false;
 
-        if (method_exists($instance, 'failed')) {
-            $instance->failed($this->payload('data'), $e);
-        }
-    }
+    /**
+     * Get the number of times the job has been attempted.
+     * @return int
+     */
+    abstract public function attempts();
 
     /**
      * Delete the job from the queue.
@@ -117,6 +73,94 @@ abstract class Job
     public function delete()
     {
         $this->deleted = true;
+    }
+
+    /**
+     * Process an exception that caused the job to fail.
+     *
+     * @param Exception $e
+     *
+     * @return void
+     */
+    public function failed($e)
+    {
+        $this->markAsFailed();
+
+        $payload = $this->payload();
+
+        list($class, $method) = $this->parseJob($payload['job']);
+
+        if (method_exists($this->instance = $this->resolve($class), 'failed')) {
+            $this->instance->failed($payload['data'], $e);
+        }
+    }
+
+    /**
+     * Fire the job.
+     * @return void
+     */
+    public function fire()
+    {
+        $payload = $this->payload();
+
+        list($class, $method) = $this->parseJob($payload['job']);
+
+        $this->instance = $this->resolve($class);
+        if ($this->instance) {
+            $this->instance->{$method}($this, $payload['data']);
+        }
+    }
+
+    /**
+     * Get the name of the connection the job belongs to.
+     *
+     * @return string
+     */
+    public function getConnection()
+    {
+        return $this->connection;
+    }
+
+    /**
+     * Get the job identifier.
+     *
+     * @return string
+     */
+    abstract public function getJobId();
+
+    /**
+     * Get the name of the queued job class.
+     *
+     * @return string
+     */
+    public function getName()
+    {
+        return $this->payload()['job'];
+    }
+
+    /**
+     * Get the name of the queue the job belongs to.
+     * @return string
+     */
+    public function getQueue()
+    {
+        return $this->queue;
+    }
+
+    /**
+     * Get the raw body string for the job.
+     * @return string
+     */
+    abstract public function getRawBody();
+
+    /**
+     * Determine if the job has been marked as a failure.
+     *
+     * @return bool
+     */
+    public function hasFailed()
+    {
+        return $this->failed;
     }
 
     /**
@@ -129,25 +173,6 @@ abstract class Job
     }
 
     /**
-     * Release the job back into the queue.
-     * @param int $delay
-     * @return void
-     */
-    public function release($delay = 0)
-    {
-        $this->released = true;
-    }
-
-    /**
-     * Determine if the job was released back into the queue.
-     * @return bool
-     */
-    public function isReleased()
-    {
-        return $this->released;
-    }
-
-    /**
      * Determine if the job has been deleted or released.
      * @return bool
      */
@@ -157,69 +182,12 @@ abstract class Job
     }
 
     /**
-     * Get the job identifier.
-     *
-     * @return string
-     */
-    abstract public function getJobId();
-
-    /**
-     * Get the number of times the job has been attempted.
-     * @return int
-     */
-    abstract public function attempts();
-
-    /**
-     * Get the raw body string for the job.
-     * @return string
-     */
-    abstract public function getRawBody();
-
-    /**
-     * Parse the job declaration into class and method.
-     * @return array
-     */
-    protected function getParsedJob()
-    {
-        $job      = $this->payload('job');
-        $segments = explode('@', $job);
-
-        return count($segments) > 1 ? $segments : [$segments[0], 'fire'];
-    }
-
-    /**
-     * Resolve the given job handler.
-     * @param string $name
-     * @return mixed
-     */
-    protected function resolve($name, $param)
-    {
-        $namespace = $this->app->getNamespace() . '\\job\\';
-
-        $class = false !== strpos($name, '\\') ? $name : $namespace . Str::studly($name);
-
-        return $this->app->make($class, [$param], true);
-    }
-
-    public function getResolvedJob()
-    {
-        if (empty($this->instance)) {
-            [$class] = $this->getParsedJob();
-
-            $this->instance = $this->resolve($class, $this->payload('data'));
-        }
-
-        return $this->instance;
-    }
-
-    /**
-     * Determine if the job has been marked as a failure.
-     *
+     * Determine if the job was released back into the queue.
      * @return bool
      */
-    public function hasFailed()
+    public function isReleased()
     {
-        return $this->failed;
+        return $this->released;
     }
 
     /**
@@ -239,7 +207,29 @@ abstract class Job
      */
     public function maxTries()
     {
-        return $this->payload('maxTries');
+        return $this->payload()['maxTries'] ?? null;
+    }
+
+    /**
+     * Get the decoded body of the job.
+     *
+     * @return array
+     */
+    public function payload()
+    {
+        return json_decode($this->getRawBody(), true);
+    }
+
+    /**
+     * Release the job back into the queue.
+     *
+     * @param int $delay
+     *
+     * @return void
+     */
+    public function release($delay = 0)
+    {
+        $this->released = true;
     }
 
     /**
@@ -249,7 +239,7 @@ abstract class Job
      */
     public function timeout()
     {
-        return $this->payload('timeout');
+        return $this->payload()['timeout'] ?? null;
     }
 
     /**
@@ -259,35 +249,45 @@ abstract class Job
      */
     public function timeoutAt()
     {
-        return $this->payload('timeoutAt');
+        return $this->payload()['timeoutAt'] ?? null;
     }
 
     /**
-     * Get the name of the queued job class.
+     * Parse the job declaration into class and method.
      *
-     * @return string
-     */
-    public function getName()
-    {
-        return $this->payload('job');
-    }
-
-    /**
-     * Get the name of the connection the job belongs to.
+     * @param string $job
      *
-     * @return string
+     * @return array
      */
-    public function getConnection()
+    protected function parseJob($job)
     {
-        return $this->connection;
+        $segments = explode('@', $job);
+
+        return count($segments) > 1 ? $segments : [$segments[0], 'fire'];
     }
 
     /**
-     * Get the name of the queue the job belongs to.
-     * @return string
+     * Resolve the given job handler.
+     *
+     * @param string $name
+     *
+     * @return mixed
      */
-    public function getQueue()
+    protected function resolve($name)
     {
-        return $this->queue;
+        if (strpos($name, '\\') === false) {
+            if (strpos($name, '/') === false) {
+                $app = '';
+            } else {
+                list($app, $name) = explode('/', $name, 2);
+            }
+
+            $name = ($this->app->config->get('app.app_namespace') ?: 'app\\') . ($app ? strtolower($app) . '\\' : '') . 'job\\' . $name;
+        }
+        if ( ! class_exists($name)) {
+            Log::queue("[RESOLVE][ERROR]:Class {$name} not exists!");
+        }
+
+        return $this->app->make($name);
     }
 }

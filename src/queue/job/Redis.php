@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -12,23 +13,29 @@
 namespace think\queue\job;
 
 use think\App;
-use think\queue\connector\Redis as RedisQueue;
 use think\queue\Job;
+use think\queue\connector\Redis as RedisQueue;
 
 class Redis extends Job
 {
-
     /**
-     * The redis queue instance.
-     * @var RedisQueue
+     * The JSON decoded version of "$job".
+     *
+     * @var array
      */
-    protected $redis;
+    protected $decoded;
 
     /**
      * The database job payload.
      * @var Object
      */
     protected $job;
+
+    /**
+     * The redis queue instance.
+     * @var RedisQueue
+     */
+    protected $redis;
 
     /**
      * The Redis job payload inside the reserved queue.
@@ -39,12 +46,14 @@ class Redis extends Job
 
     public function __construct(App $app, RedisQueue $redis, $job, $reserved, $connection, $queue)
     {
-        $this->app        = $app;
-        $this->job        = $job;
-        $this->queue      = $queue;
+        $this->app = $app;
+        $this->job = $job;
+        $this->queue = $queue;
         $this->connection = $connection;
-        $this->redis      = $redis;
-        $this->reserved   = $reserved;
+        $this->redis = $redis;
+        $this->reserved = $reserved;
+
+        $this->decoded = $this->payload();
     }
 
     /**
@@ -53,16 +62,7 @@ class Redis extends Job
      */
     public function attempts()
     {
-        return $this->payload('attempts') + 1;
-    }
-
-    /**
-     * Get the raw body string for the job.
-     * @return string
-     */
-    public function getRawBody()
-    {
-        return $this->job;
+        return ($this->decoded['attempts'] ?? null) + 1;
     }
 
     /**
@@ -78,26 +78,22 @@ class Redis extends Job
     }
 
     /**
-     * 重新发布任务
-     *
-     * @param int $delay
-     * @return void
-     */
-    public function release($delay = 0)
-    {
-        parent::release($delay);
-
-        $this->redis->deleteAndRelease($this->queue, $this, $delay);
-    }
-
-    /**
      * Get the job identifier.
      *
      * @return string
      */
     public function getJobId()
     {
-        return $this->payload('id');
+        return $this->decoded['id'] ?? null;
+    }
+
+    /**
+     * Get the raw body string for the job.
+     * @return string
+     */
+    public function getRawBody()
+    {
+        return $this->job;
     }
 
     /**
@@ -108,5 +104,19 @@ class Redis extends Job
     public function getReservedJob()
     {
         return $this->reserved;
+    }
+
+    /**
+     * 重新发布任务
+     *
+     * @param int $delay
+     *
+     * @return void
+     */
+    public function release($delay = 0)
+    {
+        parent::release($delay);
+
+        $this->redis->deleteAndRelease($this->queue, $this, $delay);
     }
 }

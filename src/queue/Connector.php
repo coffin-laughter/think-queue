@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -11,9 +12,9 @@
 
 namespace think\queue;
 
+use think\App;
 use DateTimeInterface;
 use InvalidArgumentException;
-use think\App;
 
 abstract class Connector
 {
@@ -29,7 +30,43 @@ abstract class Connector
 
     protected $options = [];
 
-    abstract public function size($queue = null);
+    public function bulk($jobs, $data = '', $queue = null)
+    {
+        foreach ((array) $jobs as $job) {
+            $this->push($job, $data, $queue);
+        }
+    }
+
+    /**
+     * Get the connector name for the queue.
+     *
+     * @return string
+     */
+    public function getConnection()
+    {
+        return $this->connection;
+    }
+
+    public function getJobExpiration($job)
+    {
+        if ( ! method_exists($job, 'retryUntil') && ! isset($job->timeoutAt)) {
+            return;
+        }
+
+        $expiration = $job->timeoutAt ?? $job->retryUntil();
+
+        return $expiration instanceof DateTimeInterface
+            ? $expiration->getTimestamp() : $expiration;
+    }
+
+    abstract public function later($delay, $job, $data = '', $queue = null);
+
+    public function laterOn($queue, $delay, $job, $data = '')
+    {
+        return $this->later($delay, $job, $data, $queue);
+    }
+
+    abstract public function pop($queue = null);
 
     abstract public function push($job, $data = '', $queue = null);
 
@@ -40,21 +77,42 @@ abstract class Connector
 
     abstract public function pushRaw($payload, $queue = null, array $options = []);
 
-    abstract public function later($delay, $job, $data = '', $queue = null);
-
-    public function laterOn($queue, $delay, $job, $data = '')
+    public function setApp(App $app)
     {
-        return $this->later($delay, $job, $data, $queue);
+        $this->app = $app;
+
+        return $this;
     }
 
-    public function bulk($jobs, $data = '', $queue = null)
+    /**
+     * Set the connector name for the queue.
+     *
+     * @param string $name
+     *
+     * @return $this
+     */
+    public function setConnection($name)
     {
-        foreach ((array) $jobs as $job) {
-            $this->push($job, $data, $queue);
-        }
+        $this->connection = $name;
+
+        return $this;
     }
 
-    abstract public function pop($queue = null);
+    abstract public function size($queue = null);
+
+    protected function createObjectPayload($job)
+    {
+        return [
+            'job'       => 'think\queue\CallQueuedHandler@call',
+            'maxTries'  => $job->tries ?? null,
+            'timeout'   => $job->timeout ?? null,
+            'timeoutAt' => $this->getJobExpiration($job),
+            'data'      => [
+                'commandName' => get_class($job),
+                'command'     => serialize(clone $job),
+            ],
+        ];
+    }
 
     protected function createPayload($job, $data = '')
     {
@@ -86,71 +144,16 @@ abstract class Connector
         ];
     }
 
-    protected function createObjectPayload($job)
-    {
-        return [
-            'job'       => 'think\queue\CallQueuedHandler@call',
-            'maxTries'  => $job->tries ?? null,
-            'timeout'   => $job->timeout ?? null,
-            'timeoutAt' => $this->getJobExpiration($job),
-            'data'      => [
-                'commandName' => get_class($job),
-                'command'     => serialize(clone $job),
-            ],
-        ];
-    }
-
-    public function getJobExpiration($job)
-    {
-        if (!method_exists($job, 'retryUntil') && !isset($job->timeoutAt)) {
-            return;
-        }
-
-        $expiration = $job->timeoutAt ?? $job->retryUntil();
-
-        return $expiration instanceof DateTimeInterface
-            ? $expiration->getTimestamp() : $expiration;
-    }
-
     protected function setMeta($payload, $key, $value)
     {
-        $payload       = json_decode($payload, true);
-        $payload[$key] = $value;
-        $payload       = json_encode($payload);
+        $payload = json_decode($payload, true);
+        $payload[ $key ] = $value;
+        $payload = json_encode($payload);
 
         if (JSON_ERROR_NONE !== json_last_error()) {
             throw new InvalidArgumentException('Unable to create payload: ' . json_last_error_msg());
         }
 
         return $payload;
-    }
-
-    public function setApp(App $app)
-    {
-        $this->app = $app;
-        return $this;
-    }
-
-    /**
-     * Get the connector name for the queue.
-     *
-     * @return string
-     */
-    public function getConnection()
-    {
-        return $this->connection;
-    }
-
-    /**
-     * Set the connector name for the queue.
-     *
-     * @param string $name
-     * @return $this
-     */
-    public function setConnection($name)
-    {
-        $this->connection = $name;
-
-        return $this;
     }
 }

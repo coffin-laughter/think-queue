@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -8,11 +9,12 @@
 // +----------------------------------------------------------------------
 // | Author: yunwuxin <448901948@qq.com>
 // +----------------------------------------------------------------------
+
 namespace think\queue\job;
 
 use think\App;
-use think\queue\connector\Database as DatabaseQueue;
 use think\queue\Job;
+use think\queue\connector\Database as DatabaseQueue;
 
 class Database extends Job
 {
@@ -30,11 +32,20 @@ class Database extends Job
 
     public function __construct(App $app, DatabaseQueue $database, $job, $connection, $queue)
     {
-        $this->app        = $app;
-        $this->job        = $job;
-        $this->queue      = $queue;
-        $this->database   = $database;
+        $this->app = $app;
+        $this->job = $job;
+        $this->queue = $queue;
+        $this->database = $database;
         $this->connection = $connection;
+    }
+
+    /**
+     * 获取当前任务尝试次数
+     * @return int
+     */
+    public function attempts()
+    {
+        return (int) $this->job->attempts;
     }
 
     /**
@@ -48,26 +59,13 @@ class Database extends Job
     }
 
     /**
-     * 重新发布任务
-     * @param int $delay
-     * @return void
+     * Get the job identifier.
+     *
+     * @return string
      */
-    public function release($delay = 0)
+    public function getJobId()
     {
-        parent::release($delay);
-
-        $this->delete();
-
-        $this->database->release($this->queue, $this->job, $delay);
-    }
-
-    /**
-     * 获取当前任务尝试次数
-     * @return int
-     */
-    public function attempts()
-    {
-        return (int) $this->job->attempts;
+        return $this->job->id;
     }
 
     /**
@@ -80,12 +78,18 @@ class Database extends Job
     }
 
     /**
-     * Get the job identifier.
+     * 重新发布任务
      *
-     * @return string
+     * @param int $delay
+     *
+     * @return void
      */
-    public function getJobId()
+    public function release($delay = 0)
     {
-        return $this->job->id;
+        parent::release($delay);
+
+        $this->delete();
+
+        $this->database->release($this->queue, $this->job, $delay);
     }
 }

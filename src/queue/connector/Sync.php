@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -12,19 +13,22 @@
 namespace think\queue\connector;
 
 use Exception;
+use Throwable;
 use think\queue\Connector;
 use think\queue\event\JobFailed;
 use think\queue\event\JobProcessed;
 use think\queue\event\JobProcessing;
 use think\queue\job\Sync as SyncJob;
-use Throwable;
 
 class Sync extends Connector
 {
-
-    public function size($queue = null)
+    public function later($delay, $job, $data = '', $queue = null)
     {
-        return 0;
+        return $this->push($job, $data, $queue);
+    }
+
+    public function pop($queue = null)
+    {
     }
 
     public function push($job, $data = '', $queue = null)
@@ -32,14 +36,13 @@ class Sync extends Connector
         $queueJob = $this->resolveJob($this->createPayload($job, $data), $queue);
 
         try {
-            $this->triggerEvent(new JobProcessing($this->connection, $job));
+            $this->triggerEvent(new JobProcessing($this->connection, $queueJob));
 
             $queueJob->fire();
 
-            $this->triggerEvent(new JobProcessed($this->connection, $job));
-        } catch (Exception | Throwable $e) {
-
-            $this->triggerEvent(new JobFailed($this->connection, $job, $e));
+            $this->triggerEvent(new JobProcessed($this->connection, $queueJob));
+        } catch (Exception|Throwable $e) {
+            $this->triggerEvent(new JobFailed($this->connection, $queueJob, $e));
 
             throw $e;
         }
@@ -47,14 +50,13 @@ class Sync extends Connector
         return 0;
     }
 
-    protected function triggerEvent($event)
+    public function pushRaw($payload, $queue = null, array $options = [])
     {
-        $this->app->event->trigger($event);
     }
 
-    public function pop($queue = null)
+    public function size($queue = null)
     {
-
+        return 0;
     }
 
     protected function resolveJob($payload, $queue)
@@ -62,13 +64,8 @@ class Sync extends Connector
         return new SyncJob($this->app, $payload, $this->connection, $queue);
     }
 
-    public function pushRaw($payload, $queue = null, array $options = [])
+    protected function triggerEvent($event)
     {
-
-    }
-
-    public function later($delay, $job, $data = '', $queue = null)
-    {
-        return $this->push($job, $data, $queue);
+        $this->app->event->trigger($event);
     }
 }

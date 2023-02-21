@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -19,15 +20,15 @@ class Restart extends Command
 {
     use InteractsWithTime;
 
+    public function handle(Cache $cache)
+    {
+        $cache->set('think:queue:restart', $this->currentTime());
+        $this->output->info('Broadcasting queue restart signal.');
+    }
+
     protected function configure()
     {
         $this->setName('queue:restart')
             ->setDescription('Restart queue worker daemons after their current job');
-    }
-
-    public function handle(Cache $cache)
-    {
-        $cache->set('think:queue:restart', $this->currentTime());
-        $this->output->info("Broadcasting queue restart signal.");
     }
 }

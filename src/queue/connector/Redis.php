@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -23,8 +24,12 @@ class Redis extends Connector
 {
     use InteractsWithTime;
 
-    /** @var  \Redis */
-    protected $redis;
+    /**
+     * The maximum number of seconds to block for a job.
+     *
+     * @var int|null
+     */
+    protected $blockFor = null;
 
     /**
      * The name of the default queue.
@@ -33,6 +38,9 @@ class Redis extends Connector
      */
     protected $default;
 
+    /** @var  \Redis */
+    protected $redis;
+
     /**
      * The expiration time of a job.
      *
@@ -40,28 +48,21 @@ class Redis extends Connector
      */
     protected $retryAfter = 60;
 
-    /**
-     * The maximum number of seconds to block for a job.
-     *
-     * @var int|null
-     */
-    protected $blockFor = null;
-
     public function __construct($redis, $default = 'default', $retryAfter = 60, $blockFor = null)
     {
-        $this->redis      = $redis;
-        $this->default    = $default;
+        $this->redis = $redis;
+        $this->default = $default;
         $this->retryAfter = $retryAfter;
-        $this->blockFor   = $blockFor;
+        $this->blockFor = $blockFor;
     }
 
     public static function __make($config)
     {
-        if (!extension_loaded('redis')) {
+        if ( ! extension_loaded('redis')) {
             throw new Exception('redis扩展未安装');
         }
 
-        $redis = new class($config) {
+        $redis = new class ($config) {
             protected $config;
             protected $client;
 
@@ -74,9 +75,9 @@ class Redis extends Connector
             protected function createClient()
             {
                 $config = $this->config;
-                $func   = $config['persistent'] ? 'pconnect' : 'connect';
+                $func = $config['persistent'] ? 'pconnect' : 'connect';
 
-                $client = new \Redis;
+                $client = new \Redis();
                 $client->$func($config['host'], $config['port'], $config['timeout']);
 
                 if ('' != $config['password']) {
@@ -86,6 +87,7 @@ class Redis extends Connector
                 if (0 != $config['select']) {
                     $client->select($config['select']);
                 }
+
                 return $client;
             }
 
@@ -106,23 +108,37 @@ class Redis extends Connector
         return new self($redis, $config['queue'], $config['retry_after'] ?? 60, $config['block_for'] ?? null);
     }
 
-    public function size($queue = null)
+    /**
+     * Delete a reserved job from the reserved queue and release it.
+     *
+     * @param string   $queue
+     * @param RedisJob $job
+     * @param int      $delay
+     *
+     * @return void
+     */
+    public function deleteAndRelease($queue, $job, $delay)
     {
         $queue = $this->getQueue($queue);
 
-        return $this->redis->lLen($queue) + $this->redis->zCard("{$queue}:delayed") + $this->redis->zCard("{$queue}:reserved");
+        $reserved = $job->getReservedJob();
+
+        $this->redis->zRem($queue . ':reserved', $reserved);
+
+        $this->redis->zAdd($queue . ':delayed', $this->availableAt($delay), $reserved);
     }
 
-    public function push($job, $data = '', $queue = null)
+    /**
+     * 删除任务
+     *
+     * @param string   $queue
+     * @param RedisJob $job
+     *
+     * @return void
+     */
+    public function deleteReserved($queue, $job)
     {
-        return $this->pushRaw($this->createPayload($job, $data), $queue);
-    }
-
-    public function pushRaw($payload, $queue = null, array $options = [])
-    {
-        if ($this->redis->rPush($this->getQueue($queue), $payload)) {
-            return json_decode($payload, true)['id'] ?? null;
-        }
+        $this->redis->zRem($this->getQueue($queue) . ':reserved', $job->getReservedJob());
     }
 
     public function later($delay, $job, $data = '', $queue = null)
@@ -130,15 +146,32 @@ class Redis extends Connector
         return $this->laterRaw($delay, $this->createPayload($job, $data), $queue);
     }
 
-    protected function laterRaw($delay, $payload, $queue = null)
+    /**
+     * 移动延迟任务
+     *
+     * @param string $from
+     * @param string $to
+     * @param bool   $attempt
+     */
+    public function migrateExpiredJobs($from, $to, $attempt = true)
     {
-        if ($this->redis->zadd(
-            $this->getQueue($queue) . ':delayed',
-            $this->availableAt($delay),
-            $payload
-        )) {
-            return json_decode($payload, true)['id'] ?? null;
+        $this->redis->watch($from);
+
+        $jobs = $this->redis->zRangeByScore($from, '-inf', $this->currentTime());
+
+        if ( ! empty($jobs)) {
+            $this->transaction(function () use ($from, $to, $jobs, $attempt) {
+                $this->redis->zRemRangeByRank($from, 0, count($jobs) - 1);
+
+                for ($i = 0; $i < count($jobs); $i += 100) {
+                    $values = array_slice($jobs, $i, 100);
+
+                    $this->redis->rPush($to, ...$values);
+                }
+            });
         }
+
+        $this->redis->unwatch();
     }
 
     public function pop($queue = null)
@@ -156,87 +189,37 @@ class Redis extends Connector
         }
     }
 
-    /**
-     * Migrate any delayed or expired jobs onto the primary queue.
-     *
-     * @param string $queue
-     * @return void
-     */
-    protected function migrate($queue)
+    public function push($job, $data = '', $queue = null)
     {
-        $this->migrateExpiredJobs($queue . ':delayed', $queue);
+        return $this->pushRaw($this->createPayload($job, $data), $queue);
+    }
 
-        if (!is_null($this->retryAfter)) {
-            $this->migrateExpiredJobs($queue . ':reserved', $queue);
+    public function pushRaw($payload, $queue = null, array $options = [])
+    {
+        if ($this->redis->rPush($this->getQueue($queue), $payload)) {
+            return json_decode($payload, true)['id'] ?? null;
         }
     }
 
-    /**
-     * 移动延迟任务
-     *
-     * @param string $from
-     * @param string $to
-     * @param bool $attempt
-     */
-    public function migrateExpiredJobs($from, $to, $attempt = true)
+    public function size($queue = null)
     {
-        $this->redis->watch($from);
+        $queue = $this->getQueue($queue);
 
-        $jobs = $this->redis->zRangeByScore($from, '-inf', $this->currentTime());
-
-        if (!empty($jobs)) {
-            $this->transaction(function () use ($from, $to, $jobs, $attempt) {
-
-                $this->redis->zRemRangeByRank($from, 0, count($jobs) - 1);
-
-                for ($i = 0; $i < count($jobs); $i += 100) {
-
-                    $values = array_slice($jobs, $i, 100);
-
-                    $this->redis->rPush($to, ...$values);
-                }
-            });
-        }
-
-        $this->redis->unwatch();
-    }
-
-    /**
-     * Retrieve the next job from the queue.
-     *
-     * @param string $queue
-     * @return array
-     */
-    protected function retrieveNextJob($queue)
-    {
-        if (!is_null($this->blockFor)) {
-            return $this->blockingPop($queue);
-        }
-
-        $job      = $this->redis->lpop($queue);
-        $reserved = false;
-
-        if ($job) {
-            $reserved = json_decode($job, true);
-            $reserved['attempts']++;
-            $reserved = json_encode($reserved);
-            $this->redis->zAdd($queue . ':reserved', $this->availableAt($this->retryAfter), $reserved);
-        }
-
-        return [$job, $reserved];
+        return $this->redis->lLen($queue) + $this->redis->zCard("{$queue}:delayed") + $this->redis->zCard("{$queue}:reserved");
     }
 
     /**
      * Retrieve the next job by blocking-pop.
      *
      * @param string $queue
+     *
      * @return array
      */
     protected function blockingPop($queue)
     {
         $rawBody = $this->redis->blpop($queue, $this->blockFor);
 
-        if (!empty($rawBody)) {
+        if ( ! empty($rawBody)) {
             $payload = json_decode($rawBody[1], true);
 
             $payload['attempts']++;
@@ -251,60 +234,26 @@ class Redis extends Connector
         return [null, null];
     }
 
-    /**
-     * 删除任务
-     *
-     * @param string $queue
-     * @param RedisJob $job
-     * @return void
-     */
-    public function deleteReserved($queue, $job)
-    {
-        $this->redis->zRem($this->getQueue($queue) . ':reserved', $job->getReservedJob());
-    }
-
-    /**
-     * Delete a reserved job from the reserved queue and release it.
-     *
-     * @param string $queue
-     * @param RedisJob $job
-     * @param int $delay
-     * @return void
-     */
-    public function deleteAndRelease($queue, $job, $delay)
-    {
-        $queue = $this->getQueue($queue);
-
-        $reserved = $job->getReservedJob();
-
-        $this->redis->zRem($queue . ':reserved', $reserved);
-
-        $this->redis->zAdd($queue . ':delayed', $this->availableAt($delay), $reserved);
-    }
-
-    /**
-     * redis事务
-     * @param Closure $closure
-     */
-    protected function transaction(Closure $closure)
-    {
-        $this->redis->multi();
-        try {
-            call_user_func($closure);
-            if (!$this->redis->exec()) {
-                $this->redis->discard();
-            }
-        } catch (Exception $e) {
-            $this->redis->discard();
-        }
-    }
-
     protected function createPayloadArray($job, $data = '')
     {
         return array_merge(parent::createPayloadArray($job, $data), [
             'id'       => $this->getRandomId(),
             'attempts' => 0,
         ]);
+    }
+
+    /**
+     * 获取队列名
+     *
+     * @param string|null $queue
+     *
+     * @return string
+     */
+    protected function getQueue($queue)
+    {
+        $queue = $queue ?: $this->default;
+
+        return "{queues:{$queue}}";
     }
 
     /**
@@ -317,15 +266,75 @@ class Redis extends Connector
         return Str::random(32);
     }
 
-    /**
-     * 获取队列名
-     *
-     * @param string|null $queue
-     * @return string
-     */
-    protected function getQueue($queue)
+    protected function laterRaw($delay, $payload, $queue = null)
     {
-        $queue = $queue ?: $this->default;
-        return "{queues:{$queue}}";
+        if ($this->redis->zadd(
+            $this->getQueue($queue) . ':delayed',
+            $this->availableAt($delay),
+            $payload
+        )) {
+            return json_decode($payload, true)['id'] ?? null;
+        }
+    }
+
+    /**
+     * Migrate any delayed or expired jobs onto the primary queue.
+     *
+     * @param string $queue
+     *
+     * @return void
+     */
+    protected function migrate($queue)
+    {
+        $this->migrateExpiredJobs($queue . ':delayed', $queue);
+
+        if ( ! is_null($this->retryAfter)) {
+            $this->migrateExpiredJobs($queue . ':reserved', $queue);
+        }
+    }
+
+    /**
+     * Retrieve the next job from the queue.
+     *
+     * @param string $queue
+     *
+     * @return array
+     */
+    protected function retrieveNextJob($queue)
+    {
+        if ( ! is_null($this->blockFor)) {
+            return $this->blockingPop($queue);
+        }
+
+        $job = $this->redis->lpop($queue);
+        $reserved = false;
+
+        if ($job) {
+            $reserved = json_decode($job, true);
+            $reserved['attempts']++;
+            $reserved = json_encode($reserved);
+            $this->redis->zAdd($queue . ':reserved', $this->availableAt($this->retryAfter), $reserved);
+        }
+
+        return [$job, $reserved];
+    }
+
+    /**
+     * redis事务
+     *
+     * @param Closure $closure
+     */
+    protected function transaction(Closure $closure)
+    {
+        $this->redis->multi();
+
+        try {
+            call_user_func($closure);
+            if ( ! $this->redis->exec()) {
+                $this->redis->discard();
+            }
+        } catch (Exception $e) {
+            $this->redis->discard();
+        }
     }
 }

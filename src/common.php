@@ -11,10 +11,11 @@
 
 use think\facade\Queue;
 
-if (!function_exists('queue')) {
+if ( ! function_exists('queue')) {
 
     /**
      * 添加到队列
+     *
      * @param        $job
      * @param string $data
      * @param int    $delay

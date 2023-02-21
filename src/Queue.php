@@ -47,6 +47,7 @@ class Queue extends Manager
 
     /**
      * @param null|string $name
+     *
      * @return Connector
      */
     public function connection($name = null)

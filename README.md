@@ -1,8 +1,13 @@
 # think-queue for ThinkPHP6
 
+### 注意:
+整个项目来源于 TP 官方的 think-queue 项目,魔改了部分,增加了 rabbitMQ 驱动.
+详情请参照 TP 关掉
+
+
 ## 安装
 
-> composer require topthink/think-queue
+> composer require coffin-laughter/think-queue
 
 ## 配置
 

@@ -2,22 +2,17 @@
 
 namespace think\queue\command;
 
-use think\console\Command;
 use think\helper\Str;
+use think\console\Command;
 use think\migration\Creator;
 
 class FailedTable extends Command
 {
-    protected function configure()
-    {
-        $this->setName('queue:failed-table')
-            ->setDescription('Create a migration for the failed queue jobs database table');
-    }
-
     public function handle()
     {
-        if (!$this->app->has('migration.creator')) {
+        if ( ! $this->app->has('migration.creator')) {
             $this->output->error('Install think-migration first please');
+
             return;
         }
 
@@ -42,5 +37,11 @@ class FailedTable extends Command
         file_put_contents($path, $contents);
 
         $this->output->info('Migration created successfully!');
+    }
+
+    protected function configure()
+    {
+        $this->setName('queue:failed-table')
+            ->setDescription('Create a migration for the failed queue jobs database table');
     }
 }

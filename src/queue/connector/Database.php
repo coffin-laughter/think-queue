@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -11,28 +12,20 @@
 
 namespace think\queue\connector;
 
-use Carbon\Carbon;
 use stdClass;
 use think\Db;
-use think\db\ConnectionInterface;
+use Carbon\Carbon;
 use think\db\Query;
 use think\queue\Connector;
+use think\db\ConnectionInterface;
 use think\queue\InteractsWithTime;
 use think\queue\job\Database as DatabaseJob;
 
 class Database extends Connector
 {
-
     use InteractsWithTime;
 
     protected $db;
-
-    /**
-     * The database table that holds the jobs.
-     *
-     * @var string
-     */
-    protected $table;
 
     /**
      * The name of the default queue.
@@ -48,11 +41,18 @@ class Database extends Connector
      */
     protected $retryAfter = 60;
 
+    /**
+     * The database table that holds the jobs.
+     *
+     * @var string
+     */
+    protected $table;
+
     public function __construct(ConnectionInterface $db, $table, $default = 'default', $retryAfter = 60)
     {
-        $this->db         = $db;
-        $this->table      = $table;
-        $this->default    = $default;
+        $this->db = $db;
+        $this->table = $table;
+        $this->default = $default;
         $this->retryAfter = $retryAfter;
     }
 
@@ -61,29 +61,6 @@ class Database extends Connector
         $connection = $db->connect($config['connection'] ?? null);
 
         return new self($connection, $config['table'], $config['queue'], $config['retry_after'] ?? 60);
-    }
-
-    public function size($queue = null)
-    {
-        return $this->db
-            ->name($this->table)
-            ->where('queue', $this->getQueue($queue))
-            ->count();
-    }
-
-    public function push($job, $data = '', $queue = null)
-    {
-        return $this->pushToDatabase($queue, $this->createPayload($job, $data));
-    }
-
-    public function pushRaw($payload, $queue = null, array $options = [])
-    {
-        return $this->pushToDatabase($queue, $payload);
-    }
-
-    public function later($delay, $job, $data = '', $queue = null)
-    {
-        return $this->pushToDatabase($queue, $this->createPayload($job, $data), $delay);
     }
 
     public function bulk($jobs, $data = '', $queue = null)
@@ -107,37 +84,24 @@ class Database extends Connector
     }
 
     /**
-     * 重新发布任务
+     * 删除任务
      *
-     * @param string $queue
-     * @param StdClass $job
-     * @param int $delay
-     * @return mixed
+     * @param string $id
+     *
+     * @return void
      */
-    public function release($queue, $job, $delay)
+    public function deleteReserved($id)
     {
-        return $this->pushToDatabase($queue, $job->payload, $delay, $job->attempts);
+        $this->db->transaction(function () use ($id) {
+            if ($this->db->name($this->table)->lock(true)->find($id)) {
+                $this->db->name($this->table)->where('id', $id)->delete();
+            }
+        });
     }
 
-    /**
-     * Push a raw payload to the database with a given delay.
-     *
-     * @param \DateTime|int $delay
-     * @param string|null $queue
-     * @param string $payload
-     * @param int $attempts
-     * @return mixed
-     */
-    protected function pushToDatabase($queue, $payload, $delay = 0, $attempts = 0)
+    public function later($delay, $job, $data = '', $queue = null)
     {
-        return $this->db->name($this->table)->insertGetId([
-            'queue'          => $this->getQueue($queue),
-            'attempts'       => $attempts,
-            'reserve_time'   => null,
-            'available_time' => $this->availableAt($delay),
-            'create_time'    => $this->currentTime(),
-            'payload'        => $payload,
-        ]);
+        return $this->pushToDatabase($queue, $this->createPayload($job, $data), $delay);
     }
 
     public function pop($queue = null)
@@ -145,9 +109,7 @@ class Database extends Connector
         $queue = $this->getQueue($queue);
 
         return $this->db->transaction(function () use ($queue) {
-
             if ($job = $this->getNextAvailableJob($queue)) {
-
                 $job = $this->markJobAsReserved($job);
 
                 return new DatabaseJob($this->app, $this, $job, $this->connection, $queue);
@@ -155,15 +117,47 @@ class Database extends Connector
         });
     }
 
+    public function push($job, $data = '', $queue = null)
+    {
+        return $this->pushToDatabase($queue, $this->createPayload($job, $data));
+    }
+
+    public function pushRaw($payload, $queue = null, array $options = [])
+    {
+        return $this->pushToDatabase($queue, $payload);
+    }
+
+    /**
+     * 重新发布任务
+     *
+     * @param string   $queue
+     * @param StdClass $job
+     * @param int      $delay
+     *
+     * @return mixed
+     */
+    public function release($queue, $job, $delay)
+    {
+        return $this->pushToDatabase($queue, $job->payload, $delay, $job->attempts);
+    }
+
+    public function size($queue = null)
+    {
+        return $this->db
+            ->name($this->table)
+            ->where('queue', $this->getQueue($queue))
+            ->count();
+    }
+
     /**
      * 获取下个有效任务
      *
      * @param string|null $queue
+     *
      * @return StdClass|null
      */
     protected function getNextAvailableJob($queue)
     {
-
         $job = $this->db
             ->name($this->table)
             ->lock(true)
@@ -171,7 +165,7 @@ class Database extends Connector
             ->where(function (Query $query) {
                 $query->where(function (Query $query) {
                     $query->whereNull('reserve_time')
-                          ->where('available_time', '<=', $this->currentTime());
+                        ->where('available_time', '<=', $this->currentTime());
                 });
 
                 //超时任务重试
@@ -187,10 +181,16 @@ class Database extends Connector
         return $job ? (object) $job : null;
     }
 
+    protected function getQueue($queue)
+    {
+        return $queue ?: $this->default;
+    }
+
     /**
      * 标记任务正在执行.
      *
      * @param stdClass $job
+     *
      * @return stdClass
      */
     protected function markJobAsReserved($job)
@@ -207,22 +207,24 @@ class Database extends Connector
     }
 
     /**
-     * 删除任务
+     * Push a raw payload to the database with a given delay.
      *
-     * @param string $id
-     * @return void
+     * @param \DateTime|int $delay
+     * @param string|null   $queue
+     * @param string        $payload
+     * @param int           $attempts
+     *
+     * @return mixed
      */
-    public function deleteReserved($id)
+    protected function pushToDatabase($queue, $payload, $delay = 0, $attempts = 0)
     {
-        $this->db->transaction(function () use ($id) {
-            if ($this->db->name($this->table)->lock(true)->find($id)) {
-                $this->db->name($this->table)->where('id', $id)->delete();
-            }
-        });
-    }
-
-    protected function getQueue($queue)
-    {
-        return $queue ?: $this->default;
+        return $this->db->name($this->table)->insertGetId([
+            'queue'          => $this->getQueue($queue),
+            'attempts'       => $attempts,
+            'reserve_time'   => null,
+            'available_time' => $this->availableAt($delay),
+            'create_time'    => $this->currentTime(),
+            'payload'        => $payload,
+        ]);
     }
 }

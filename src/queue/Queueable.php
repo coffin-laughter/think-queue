@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -13,19 +14,34 @@ namespace think\queue;
 
 trait Queueable
 {
-
     /** @var string 连接 */
     public $connection;
-
-    /** @var string 队列名称 */
-    public $queue;
 
     /** @var integer 延迟时间 */
     public $delay;
 
+    /** @var string 队列名称 */
+    public $queue;
+
+    /**
+     * 设置延迟时间
+     *
+     * @param $delay
+     *
+     * @return $this
+     */
+    public function delay($delay)
+    {
+        $this->delay = $delay;
+
+        return $this;
+    }
+
     /**
      * 设置连接名
+     *
      * @param $connection
+     *
      * @return $this
      */
     public function onConnection($connection)
@@ -37,24 +53,14 @@ trait Queueable
 
     /**
      * 设置队列名
+     *
      * @param $queue
+     *
      * @return $this
      */
     public function onQueue($queue)
     {
         $this->queue = $queue;
-
-        return $this;
-    }
-
-    /**
-     * 设置延迟时间
-     * @param $delay
-     * @return $this
-     */
-    public function delay($delay)
-    {
-        $this->delay = $delay;
 
         return $this;
     }

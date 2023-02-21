@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -21,14 +22,14 @@ class Sync extends Job
      *
      * @var string
      */
-    protected $job;
+    protected $payload;
 
-    public function __construct(App $app, $job, $connection, $queue)
+    public function __construct(App $app, $payload, $connection, $queue)
     {
-        $this->app        = $app;
+        $this->app = $app;
         $this->connection = $connection;
-        $this->queue      = $queue;
-        $this->job        = $job;
+        $this->queue = $queue;
+        $this->payload = $payload;
     }
 
     /**
@@ -38,15 +39,6 @@ class Sync extends Job
     public function attempts()
     {
         return 1;
-    }
-
-    /**
-     * Get the raw body string for the job.
-     * @return string
-     */
-    public function getRawBody()
-    {
-        return $this->job;
     }
 
     /**
@@ -62,5 +54,14 @@ class Sync extends Job
     public function getQueue()
     {
         return 'sync';
+    }
+
+    /**
+     * Get the raw body string for the job.
+     * @return string
+     */
+    public function getRawBody()
+    {
+        return $this->payload;
     }
 }

@@ -2,9 +2,9 @@
 
 namespace think\queue\command;
 
-use think\console\Command;
-use think\console\Table;
 use think\helper\Arr;
+use think\console\Table;
+use think\console\Command;
 
 class ListFailed extends Command
 {
@@ -15,25 +15,27 @@ class ListFailed extends Command
      */
     protected $headers = ['ID', 'Connection', 'Queue', 'Class', 'Fail Time'];
 
+    public function handle()
+    {
+        if (count($jobs = $this->getFailedJobs()) === 0) {
+            $this->output->info('No failed jobs!');
+
+            return;
+        }
+        $this->displayFailedJobs($jobs);
+    }
+
     protected function configure()
     {
         $this->setName('queue:failed')
             ->setDescription('List all of the failed queue jobs');
     }
 
-    public function handle()
-    {
-        if (count($jobs = $this->getFailedJobs()) === 0) {
-            $this->output->info('No failed jobs!');
-            return;
-        }
-        $this->displayFailedJobs($jobs);
-    }
-
     /**
      * Display the failed jobs in the console.
      *
      * @param array $jobs
+     *
      * @return void
      */
     protected function displayFailedJobs(array $jobs)
@@ -60,9 +62,28 @@ class ListFailed extends Command
     }
 
     /**
+     * Match the job name from the payload.
+     *
+     * @param array $payload
+     *
+     * @return string
+     */
+    protected function matchJobName($payload)
+    {
+        preg_match('/"([^"]+)"/', $payload['data']['command'], $matches);
+
+        if (isset($matches[1])) {
+            return $matches[1];
+        }
+
+        return $payload['job'] ?? null;
+    }
+
+    /**
      * Parse the failed job row.
      *
      * @param array $failed
+     *
      * @return array
      */
     protected function parseFailedJob(array $failed)
@@ -78,33 +99,17 @@ class ListFailed extends Command
      * Extract the failed job name from payload.
      *
      * @param string $payload
+     *
      * @return string|null
      */
     private function extractJobName($payload)
     {
         $payload = json_decode($payload, true);
 
-        if ($payload && (!isset($payload['data']['command']))) {
+        if ($payload && ( ! isset($payload['data']['command']))) {
             return $payload['job'] ?? null;
         } elseif ($payload && isset($payload['data']['command'])) {
             return $this->matchJobName($payload);
         }
-    }
-
-    /**
-     * Match the job name from the payload.
-     *
-     * @param array $payload
-     * @return string
-     */
-    protected function matchJobName($payload)
-    {
-        preg_match('/"([^"]+)"/', $payload['data']['command'], $matches);
-
-        if (isset($matches[1])) {
-            return $matches[1];
-        }
-
-        return $payload['job'] ?? null;
     }
 }

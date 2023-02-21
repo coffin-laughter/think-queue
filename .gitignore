@@ -2,3 +2,4 @@
 /.idea/
 /composer.lock
 /thinkphp/
+/.php-cs-fixer.cache

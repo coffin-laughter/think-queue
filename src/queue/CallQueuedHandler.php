@@ -1,4 +1,5 @@
 <?php
+
 // +----------------------------------------------------------------------
 // | ThinkPHP [ WE CAN DO IT JUST THINK IT ]
 // +----------------------------------------------------------------------
@@ -28,7 +29,7 @@ class CallQueuedHandler
 
         $this->app->invoke([$command, 'handle']);
 
-        if (!$job->isDeletedOrReleased()) {
+        if ( ! $job->isDeletedOrReleased()) {
             $job->delete();
         }
     }
