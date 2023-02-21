@@ -1,5 +1,5 @@
 {
-    "name": "topthink/think-queue",
+    "name": "coffin-laughter/think-queue",
     "description": "The ThinkPHP6 Queue Package",
     "license": "Apache-2.0",
     "autoload": {
