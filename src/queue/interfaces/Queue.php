@@ -14,7 +14,7 @@ declare(strict_types = 1);
 
 namespace think\queue\interfaces;
 
-interface queue
+interface Queue
 {
     /**
      * 推送Job到队列
